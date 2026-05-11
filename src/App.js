@@ -243,7 +243,7 @@ const pill = { background:"#E8ECF0", padding:"1px 6px", borderRadius:4, fontFami
    ADMIN DASHBOARD
 ═══════════════════════════════════════════════════════════ */
 function AdminDashboard(props) {
-  const { user, onLogout, teams, fields, games, practices } = props;
+  const { onLogout, teams, fields, games, practices } = props;
   const [tab, setTab] = useState("teams");
 
   const NAV = [
