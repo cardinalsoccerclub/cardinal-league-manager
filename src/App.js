@@ -529,7 +529,7 @@ function TeamForm({ initial, ageGroups, onSave, onClose }) {
 /* ═══════════════════════════════════════════════════════════
    FIELDS MANAGER
 ═══════════════════════════════════════════════════════════ */
-function FieldsManager({ fields, blocked, games, upFields, upBlocked }) {
+function FieldsManager({ fields, blocked, games, upFields, upBlocked, activeLeague }) {
   const [modal,    setModal]    = useState(null);
   const [blockFor, setBlockFor] = useState(null); // field id
   const [blockV,   setBlockV]   = useState({ date:"", type:"full", startTime:"", endTime:"", reason:"" });
