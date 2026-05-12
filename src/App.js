@@ -13,7 +13,13 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 /* ─── CONSTANTS ───────────────────────────────────────────── */
 const AGE_GROUPS = ["U6", "U8", "U10"];
-const FORMAT_MAP  = { U6: "4v4", U8: "4v4", U10: "7v7" };
+const SPORT_FORMATS = {
+  outdoor: { U4:"3v3", U6:"4v4", U8:"4v4", U10:"7v7", U12:"9v9", U14:"11v11", U16:"11v11", U18:"11v11" },
+  futsal:  { U4:"3v3", U6:"3v3", U8:"4v4", U10:"5v5", U12:"5v5", U14:"5v5",  U16:"5v5",  U18:"5v5"  },
+};
+const getFormatMap = lg => SPORT_FORMATS[lg?.sport] || SPORT_FORMATS.outdoor;
+const SEED_LEAGUE_ID = "outdoor-rec-001";
+const ALL_AGE_GROUPS = ["U4","U6","U8","U10","U12","U14","U16","U18"];
 const DAY_LABELS  = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
 const C = {
@@ -69,15 +75,18 @@ function gameDates(start, end, dayNums) {
 /* ─── SEED DATA ───────────────────────────────────────────── */
 function buildSeed() {
   return {
+    leagues: [
+      { id:SEED_LEAGUE_ID, name:"Outdoor Rec", sport:"outdoor", ageGroups:["U6","U8","U10"] },
+    ],
     users:  [{ id:"admin", name:"League Admin", role:"admin", pin:"0000" }],
     teams:  [
-      { id:uid(), name:"Red Cardinals",   ageGroup:"U6",  coachName:"Coach Smith",    pin:"1111" },
-      { id:uid(), name:"Blue Jays",        ageGroup:"U6",  coachName:"Coach Jones",    pin:"2222" },
-      { id:uid(), name:"Green Hawks",      ageGroup:"U6",  coachName:"Coach Davis",    pin:"3333" },
-      { id:uid(), name:"Yellow Finches",   ageGroup:"U8",  coachName:"Coach Wilson",   pin:"4444" },
-      { id:uid(), name:"Purple Martins",   ageGroup:"U8",  coachName:"Coach Brown",    pin:"5555" },
-      { id:uid(), name:"Silver Eagles",    ageGroup:"U10", coachName:"Coach Moore",    pin:"7777" },
-      { id:uid(), name:"Gold Falcons",     ageGroup:"U10", coachName:"Coach Anderson", pin:"8888" },
+      { id:uid(), name:"Red Cardinals",   ageGroup:"U6",  coachName:"Coach Smith",    pin:"1111", leagueId:SEED_LEAGUE_ID },
+      { id:uid(), name:"Blue Jays",        ageGroup:"U6",  coachName:"Coach Jones",    pin:"2222", leagueId:SEED_LEAGUE_ID },
+      { id:uid(), name:"Green Hawks",      ageGroup:"U6",  coachName:"Coach Davis",    pin:"3333", leagueId:SEED_LEAGUE_ID },
+      { id:uid(), name:"Yellow Finches",   ageGroup:"U8",  coachName:"Coach Wilson",   pin:"4444", leagueId:SEED_LEAGUE_ID },
+      { id:uid(), name:"Purple Martins",   ageGroup:"U8",  coachName:"Coach Brown",    pin:"5555", leagueId:SEED_LEAGUE_ID },
+      { id:uid(), name:"Silver Eagles",    ageGroup:"U10", coachName:"Coach Moore",    pin:"7777", leagueId:SEED_LEAGUE_ID },
+      { id:uid(), name:"Gold Falcons",     ageGroup:"U10", coachName:"Coach Anderson", pin:"8888", leagueId:SEED_LEAGUE_ID },
     ],
     fields: [
       { id:uid(), name:"Cardinal Field A",   location:"Mentor Sports Park",  types:["4v4","7v7"] },
@@ -109,22 +118,44 @@ export default function App() {
   const [blocked,   setBlocked]   = useState([]);
   const [users,     setUsers]     = useState([]);
   const [practices, setPractices] = useState([]);
+  const [leagues,   setLeagues]   = useState([]);
 
   /* Initial load */
   useEffect(() => {
     (async () => {
       let u = await load("csc:users"),  t = await load("csc:teams"),
           f = await load("csc:fields"), g = await load("csc:games"),
-          b = await load("csc:blocked"), p = await load("csc:practices");
+          b = await load("csc:blocked"), p = await load("csc:practices"),
+          l = await load("csc:leagues");
       if (!u) {
         const s = buildSeed();
         await save("csc:users",     s.users);     await save("csc:teams",     s.teams);
         await save("csc:fields",    s.fields);    await save("csc:games",     s.games);
         await save("csc:blocked",   s.blocked);   await save("csc:practices", s.practices);
-        [u, t, f, g, b, p] = [s.users, s.teams, s.fields, s.games, s.blocked, s.practices];
+        await save("csc:leagues",   s.leagues);
+        [u, t, f, g, b, p, l] = [s.users, s.teams, s.fields, s.games, s.blocked, s.practices, s.leagues];
+      }
+      // Migration: ensure leagues exist for old data
+      if (!l || !l.length) {
+        l = [{ id:SEED_LEAGUE_ID, name:"Outdoor Rec", sport:"outdoor", ageGroups:["U6","U8","U10"] }];
+        await save("csc:leagues", l);
+      }
+      // Migration: stamp leagueId on legacy teams/games/practices
+      const firstId = l[0].id;
+      if (t && t.some(x => !x.leagueId)) {
+        t = t.map(x => x.leagueId ? x : { ...x, leagueId:firstId });
+        await save("csc:teams", t);
+      }
+      if (g && g.some(x => !x.leagueId)) {
+        g = g.map(x => x.leagueId ? x : { ...x, leagueId:firstId });
+        await save("csc:games", g);
+      }
+      if (p && p.some(x => !x.leagueId)) {
+        p = p.map(x => x.leagueId ? x : { ...x, leagueId:firstId });
+        await save("csc:practices", p);
       }
       setUsers(u||[]); setTeams(t||[]); setFields(f||[]); setGames(g||[]);
-      setBlocked(b||[]); setPractices(p||[]);
+      setBlocked(b||[]); setPractices(p||[]); setLeagues(l||[]);
       setReady(true);
     })();
   }, []);
@@ -135,6 +166,7 @@ export default function App() {
   const upBlocked   = async v => { setBlocked(v);   await save("csc:blocked",   v); };
   const upUsers     = async v => { setUsers(v);     await save("csc:users",     v); };
   const upPractices = async v => { setPractices(v); await save("csc:practices", v); };
+  const upLeagues   = async v => { setLeagues(v);   await save("csc:leagues",   v); };
 
   if (!ready) return (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
@@ -147,8 +179,8 @@ export default function App() {
     </div>
   );
 
-  const common = { teams, fields, games, blocked, users, practices,
-                   upTeams, upFields, upGames, upBlocked, upUsers, upPractices };
+  const common = { teams, fields, games, blocked, users, practices, leagues,
+                   upTeams, upFields, upGames, upBlocked, upUsers, upPractices, upLeagues };
 
   if (!user) return <LoginScreen {...common} onLogin={setUser} />;
   if (user.role === "admin") return <AdminDashboard {...common} user={user} onLogout={() => setUser(null)} />;
@@ -243,8 +275,35 @@ const pill = { background:"#E8ECF0", padding:"1px 6px", borderRadius:4, fontFami
    ADMIN DASHBOARD
 ═══════════════════════════════════════════════════════════ */
 function AdminDashboard(props) {
-  const { onLogout, teams, fields, games, practices } = props;
+  const { onLogout, teams, fields, games, practices, leagues,
+          upTeams, upGames, upPractices } = props;
   const [tab, setTab] = useState("teams");
+  const [activeLeagueId, setActiveLeagueId] = useState(leagues[0]?.id || "");
+
+  const effectiveId  = activeLeagueId || leagues[0]?.id || "";
+  const activeLeague = leagues.find(l => l.id === effectiveId) || leagues[0] || null;
+
+  // Filtered data — each child only sees its league
+  const leagueTeams     = teams.filter(t => t.leagueId === effectiveId);
+  const leagueGames     = games.filter(g => g.leagueId === effectiveId);
+  const leaguePractices = practices.filter(p => p.leagueId === effectiveId);
+
+  // Wrapper updaters preserve other leagues' data
+  const adminUpTeams     = async v => upTeams([...teams.filter(t => t.leagueId !== effectiveId), ...v]);
+  const adminUpGames     = async v => upGames([...games.filter(g => g.leagueId !== effectiveId), ...v]);
+  const adminUpPractices = async v => upPractices([...practices.filter(p => p.leagueId !== effectiveId), ...v]);
+
+  const adminProps = {
+    ...props,
+    teams:       leagueTeams,
+    games:       leagueGames,
+    practices:   leaguePractices,
+    upTeams:     adminUpTeams,
+    upGames:     adminUpGames,
+    upPractices: adminUpPractices,
+    activeLeagueId: effectiveId,
+    activeLeague,
+  };
 
   const NAV = [
     { id:"teams",     icon:"👥", label:"Teams" },
@@ -252,13 +311,14 @@ function AdminDashboard(props) {
     { id:"schedule",  icon:"📅", label:"Schedule" },
     { id:"generator", icon:"⚡", label:"Generator" },
     { id:"practices", icon:"🏃", label:"Practices" },
+    { id:"leagues",   icon:"🏆", label:"Leagues" },
   ];
 
   const stats = [
-    { label:"Teams",     value:teams.length },
+    { label:"Teams",     value:leagueTeams.length },
     { label:"Fields",    value:fields.length },
-    { label:"Games",     value:games.length },
-    { label:"Practices", value:practices.length },
+    { label:"Games",     value:leagueGames.length },
+    { label:"Practices", value:leaguePractices.length },
   ];
 
   return (
@@ -267,8 +327,8 @@ function AdminDashboard(props) {
       {/* ─ Sidebar ─ */}
       <div style={{ width:220, background:C.navy, display:"flex", flexDirection:"column", flexShrink:0,
         boxShadow:"4px 0 20px rgba(0,0,0,0.2)" }}>
-        <div style={{ padding:"22px 18px 18px", borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <div style={{ padding:"18px 18px 14px", borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
             <div style={{ width:38, height:38, borderRadius:"50%", background:C.red,
               display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
               flexShrink:0 }}>⚽</div>
@@ -277,6 +337,19 @@ function AdminDashboard(props) {
               <div style={{ color:C.gold, fontSize:11, fontWeight:600, letterSpacing:1 }}>ADMIN PANEL</div>
             </div>
           </div>
+          {/* League switcher */}
+          <select value={effectiveId}
+            onChange={e => { setActiveLeagueId(e.target.value); setTab("teams"); }}
+            style={{ width:"100%", padding:"8px 10px", background:"rgba(255,255,255,0.1)",
+              color:C.white, border:"1px solid rgba(255,255,255,0.2)", borderRadius:8,
+              fontSize:13, fontWeight:600, outline:"none", cursor:"pointer",
+              fontFamily:"DM Sans,sans-serif" }}>
+            {leagues.map(l => (
+              <option key={l.id} value={l.id} style={{ background:C.navy, color:C.white }}>
+                {l.sport==="futsal"?"🏟️":"⚽"} {l.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <nav style={{ flex:1, padding:"14px 10px" }}>
@@ -293,7 +366,7 @@ function AdminDashboard(props) {
           ))}
         </nav>
 
-        {/* Stats pills */}
+        {/* Stats */}
         <div style={{ padding:"14px 14px", borderTop:"1px solid rgba(255,255,255,0.07)", borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
           {stats.map(s => (
             <div key={s.label} style={{ display:"flex", justifyContent:"space-between", padding:"4px 0", fontSize:12 }}>
@@ -313,11 +386,12 @@ function AdminDashboard(props) {
 
       {/* ─ Content ─ */}
       <div style={{ flex:1, overflow:"auto", padding:28 }}>
-        {tab==="teams"     && <TeamsManager    {...props} />}
-        {tab==="fields"    && <FieldsManager   {...props} />}
-        {tab==="schedule"  && <ScheduleViewer  {...props} />}
-        {tab==="generator" && <ScheduleGenerator {...props} onDone={() => setTab("schedule")} />}
-        {tab==="practices" && <PracticesAdmin  {...props} />}
+        {tab==="teams"     && <TeamsManager    {...adminProps} />}
+        {tab==="fields"    && <FieldsManager   {...adminProps} />}
+        {tab==="schedule"  && <ScheduleViewer  {...adminProps} />}
+        {tab==="generator" && <ScheduleGenerator {...adminProps} onDone={() => setTab("schedule")} />}
+        {tab==="practices" && <PracticesAdmin  {...adminProps} />}
+        {tab==="leagues"   && <LeaguesManager  {...props} />}
       </div>
     </div>
   );
@@ -326,10 +400,13 @@ function AdminDashboard(props) {
 /* ═══════════════════════════════════════════════════════════
    TEAMS MANAGER
 ═══════════════════════════════════════════════════════════ */
-function TeamsManager({ teams, upTeams }) {
+function TeamsManager({ teams, upTeams, activeLeagueId, activeLeague }) {
   const [modal,  setModal]  = useState(null);
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
+
+  const leagueAGs = activeLeague?.ageGroups || AGE_GROUPS;
+  const fmtMap    = getFormatMap(activeLeague);
 
   const filtered = teams
     .filter(t => filter==="All" || t.ageGroup===filter)
@@ -339,7 +416,7 @@ function TeamsManager({ teams, upTeams }) {
   const handleSave = async (team) => {
     await upTeams(team.id
       ? teams.map(t => t.id===team.id ? team : t)
-      : [...teams, { ...team, id:uid() }]);
+      : [...teams, { ...team, id:uid(), leagueId:activeLeagueId }]);
     setModal(null);
   };
 
@@ -350,12 +427,12 @@ function TeamsManager({ teams, upTeams }) {
 
   return (
     <div>
-      <PageHeader title="Teams" subtitle={`${teams.length} teams · ${AGE_GROUPS.join(" · ")}`}
+      <PageHeader title="Teams"
+        subtitle={`${teams.length} teams · ${leagueAGs.join(" · ")} · ${activeLeague?.name||""}`}
         action={<Btn onClick={() => setModal({})}>＋ Add Team</Btn>} />
 
-      {/* Filter bar */}
       <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap", alignItems:"center" }}>
-        {["All",...AGE_GROUPS].map(g => (
+        {["All",...leagueAGs].map(g => (
           <Chip key={g} active={filter===g} onClick={() => setFilter(g)}>{g}</Chip>
         ))}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search teams…"
@@ -363,24 +440,23 @@ function TeamsManager({ teams, upTeams }) {
             borderRadius:20, fontSize:13, outline:"none", width:180, fontFamily:"DM Sans,sans-serif" }} />
       </div>
 
-      {/* Team cards by age group */}
-      {AGE_GROUPS.map(ag => {
+      {leagueAGs.map(ag => {
         const grp = filtered.filter(t => t.ageGroup===ag);
         if (!grp.length) return null;
+        const fmt = fmtMap[ag] || ag;
         return (
           <div key={ag} style={{ marginBottom:28 }}>
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
               <span style={{ background:C.red, color:C.white, fontFamily:"Oswald,sans-serif",
                 fontWeight:600, fontSize:12, padding:"3px 10px", borderRadius:4, letterSpacing:1 }}>{ag}</span>
               <span style={{ fontSize:13, color:C.muted }}>
-                {grp.length} team{grp.length!==1?"s":""} · {FORMAT_MAP[ag]} format
+                {grp.length} team{grp.length!==1?"s":""} · {fmt} format
               </span>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))", gap:12 }}>
               {grp.map(team => (
                 <div key={team.id} style={{ background:C.white, borderRadius:12, padding:"18px",
-                  border:`1px solid ${C.border}`, boxShadow:"0 1px 4px rgba(0,0,0,0.05)",
-                  transition:"box-shadow 0.15s" }}>
+                  border:`1px solid ${C.border}`, boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                     <div>
                       <div style={{ fontWeight:700, fontSize:15, color:C.text }}>{team.name}</div>
@@ -400,7 +476,7 @@ function TeamsManager({ teams, upTeams }) {
                         fontFamily:"monospace", fontSize:13, color:C.text }}>{team.pin}</code>
                     </span>
                     <span style={{ fontSize:11, background:"#EEF2FF", color:"#4F46E5",
-                      padding:"2px 8px", borderRadius:12, fontWeight:600 }}>{FORMAT_MAP[ag]}</span>
+                      padding:"2px 8px", borderRadius:12, fontWeight:600 }}>{fmt}</span>
                   </div>
                 </div>
               ))}
@@ -413,15 +489,15 @@ function TeamsManager({ teams, upTeams }) {
 
       {modal!==null && (
         <Modal title={modal.id ? "Edit Team" : "Add Team"} onClose={() => setModal(null)}>
-          <TeamForm initial={modal} onSave={handleSave} onClose={() => setModal(null)} />
+          <TeamForm initial={modal} ageGroups={leagueAGs} onSave={handleSave} onClose={() => setModal(null)} />
         </Modal>
       )}
     </div>
   );
 }
 
-function TeamForm({ initial, onSave, onClose }) {
-  const [v, setV] = useState({ name:"", ageGroup:"U6", coachName:"", pin:"", ...initial });
+function TeamForm({ initial, ageGroups, onSave, onClose }) {
+  const [v, setV] = useState({ name:"", ageGroup:ageGroups[0]||"U6", coachName:"", pin:"", ...initial });
   const set = k => e => setV(p => ({...p, [k]:e.target.value}));
   const valid = v.name.trim() && v.coachName.trim() && v.pin.trim().length >= 4;
   return (
@@ -429,10 +505,10 @@ function TeamForm({ initial, onSave, onClose }) {
       <FInput label="Team Name"   value={v.name}      onChange={set("name")}      placeholder="e.g. Red Cardinals" />
       <div>
         <Label>AGE GROUP</Label>
-        <div style={{ display:"flex", gap:8, marginTop:8 }}>
-          {AGE_GROUPS.map(g => (
+        <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+          {ageGroups.map(g => (
             <button key={g} onClick={() => setV(p=>({...p,ageGroup:g}))} style={{
-              flex:1, padding:"9px", border:`1px solid ${v.ageGroup===g?C.red:C.border}`,
+              padding:"8px 14px", border:`1px solid ${v.ageGroup===g?C.red:C.border}`,
               background:v.ageGroup===g?C.red:C.white, color:v.ageGroup===g?C.white:C.sub,
               borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer"
             }}>{g}</button>
@@ -606,8 +682,8 @@ function FieldsManager({ fields, blocked, games, upFields, upBlocked }) {
 
       {/* Modals */}
       {modal!==null && (
-        <Modal title={modal.id ? "Edit Field" : "Add Field"} onClose={() => setModal(null)}>
-          <FieldForm initial={modal} onSave={handleSave} onClose={() => setModal(null)} />
+        <Modal title={modal.id ? "Edit Venue" : "Add Venue"} onClose={() => setModal(null)}>
+          <FieldForm initial={modal} onSave={handleSave} onClose={() => setModal(null)} activeLeague={activeLeague} />
         </Modal>
       )}
       {blockFor && (
@@ -663,31 +739,43 @@ function FieldsManager({ fields, blocked, games, upFields, upBlocked }) {
   );
 }
 
-function FieldForm({ initial, onSave, onClose }) {
+function FieldForm({ initial, onSave, onClose, activeLeague }) {
   const ALL_TYPES = ["4v4","7v7","9v9","11v11"];
-  const [v, setV] = useState({ name:"", location:"", address:"", types:["4v4","7v7"], ...initial });
+  const isFutsal  = activeLeague?.sport === "futsal";
+  const [v, setV] = useState({
+    name:"", location:"", address:"",
+    types: isFutsal ? ["gym"] : ["4v4","7v7"], isGym: isFutsal,
+    ...initial
+  });
   const set = k => e => setV(p => ({...p, [k]:e.target.value}));
   const toggleType = t => setV(p => ({...p, types:p.types.includes(t) ? p.types.filter(x=>x!==t) : [...p.types,t]}));
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-      <FInput label="Field Name"     value={v.name}     onChange={set("name")}     placeholder="e.g. Cardinal Field A" />
-      <FInput label="VENUE / PARK"   value={v.location} onChange={set("location")} placeholder="e.g. Mentor Sports Park" />
+      <FInput label="Venue Name"     value={v.name}     onChange={set("name")}     placeholder={isFutsal ? "e.g. Mentor Fieldhouse" : "e.g. Cardinal Field A"} />
+      <FInput label="FACILITY / PARK" value={v.location} onChange={set("location")} placeholder={isFutsal ? "e.g. Mentor Indoor Sports" : "e.g. Mentor Sports Park"} />
       <FInput label="STREET ADDRESS" value={v.address}  onChange={set("address")}  placeholder="e.g. 1234 Mentor Ave, Mentor, OH 44060" />
-      <div>
-        <Label>SUPPORTED FORMATS</Label>
-        <div style={{ display:"flex", gap:8, marginTop:8 }}>
-          {ALL_TYPES.map(t => (
-            <button key={t} onClick={() => toggleType(t)} style={{
-              flex:1, padding:"8px", border:`1px solid ${v.types.includes(t)?C.red:C.border}`,
-              background:v.types.includes(t)?C.red:C.white,
-              color:v.types.includes(t)?C.white:C.sub,
-              borderRadius:8, fontSize:12, fontWeight:600, cursor:"pointer"
-            }}>{t}</button>
-          ))}
+      {isFutsal ? (
+        <div style={{ padding:"10px 14px", background:"#EEF2FF", border:"1px solid #C7D2FE",
+          borderRadius:8, fontSize:13, color:"#4338CA" }}>
+          🏟️ <strong>Gym / Indoor Venue</strong> — no field format required for Futsal
         </div>
-      </div>
+      ) : (
+        <div>
+          <Label>SUPPORTED FORMATS</Label>
+          <div style={{ display:"flex", gap:8, marginTop:8 }}>
+            {ALL_TYPES.map(t => (
+              <button key={t} onClick={() => toggleType(t)} style={{
+                flex:1, padding:"8px", border:`1px solid ${v.types.includes(t)?C.red:C.border}`,
+                background:v.types.includes(t)?C.red:C.white,
+                color:v.types.includes(t)?C.white:C.sub,
+                borderRadius:8, fontSize:12, fontWeight:600, cursor:"pointer"
+              }}>{t}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ display:"flex", gap:10, marginTop:6 }}>
-        <Btn onClick={() => v.name && v.location && onSave(v)} full>Save Field</Btn>
+        <Btn onClick={() => v.name && v.location && onSave({...v, types: isFutsal ? ["gym"] : v.types})} full>Save Venue</Btn>
         <Btn onClick={onClose} outline>Cancel</Btn>
       </div>
     </div>
@@ -697,7 +785,7 @@ function FieldForm({ initial, onSave, onClose }) {
 /* ═══════════════════════════════════════════════════════════
    SCHEDULE VIEWER
 ═══════════════════════════════════════════════════════════ */
-function ScheduleViewer({ games, teams, fields, upGames }) {
+function ScheduleViewer({ games, upGames }) {
   const [filterAG,     setFilterAG]     = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
   const [search,       setSearch]       = useState("");
@@ -714,21 +802,39 @@ function ScheduleViewer({ games, teams, fields, upGames }) {
       await upGames(games.filter(g => g.id!==id));
   };
 
+  const exportCSV = () => {
+    const rows = [["Date","Day","Time","Age Group","Home Team","Away Team","Field","Status"]];
+    filtered.forEach(g => {
+      const d = new Date(g.date+"T12:00:00");
+      rows.push([
+        g.date,
+        d.toLocaleDateString("en-US",{weekday:"long"}),
+        g.time, g.ageGroup, g.homeTeamName, g.awayTeamName, g.fieldName, g.status
+      ]);
+    });
+    const csv  = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type:"text/csv" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a"); a.href=url; a.download="schedule.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Age groups present in this league's games
+  const ageGroupsInGames = [...new Set(games.map(g => g.ageGroup))].sort();
+
   const sColor = s => s==="scheduled"?"#DCFCE7":s==="rescheduled"?"#FEF3C7":s==="cancelled"?"#FEE2E2":"#F3F4F6";
   const sTColor = s => s==="scheduled"?C.success:s==="rescheduled"?C.warn:s==="cancelled"?C.danger:C.muted;
 
-  // Group by date for the table
-  const grouped = {};
-  filtered.forEach(g => { (grouped[g.date] = grouped[g.date]||[]).push(g); });
-
   return (
     <div>
-      <PageHeader title="Schedule" subtitle={`${games.length} total games · ${filtered.length} shown`} />
+      <PageHeader title="Schedule" subtitle={`${games.length} total games · ${filtered.length} shown`}
+        action={filtered.length>0
+          ? <Btn onClick={exportCSV} outline>⬇ Export CSV</Btn>
+          : null} />
 
-      {/* Filters */}
       <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap", alignItems:"center" }}>
         <div style={{ display:"flex", gap:6 }}>
-          {["All",...AGE_GROUPS].map(g => <Chip key={g} active={filterAG===g} onClick={() => setFilterAG(g)}>{g}</Chip>)}
+          {["All",...ageGroupsInGames].map(g => <Chip key={g} active={filterAG===g} onClick={() => setFilterAG(g)}>{g}</Chip>)}
         </div>
         <div style={{ width:1, background:C.border, height:24 }} />
         <div style={{ display:"flex", gap:6 }}>
@@ -792,43 +898,60 @@ function ScheduleViewer({ games, teams, fields, upGames }) {
 /* ═══════════════════════════════════════════════════════════
    SCHEDULE GENERATOR
 ═══════════════════════════════════════════════════════════ */
-function ScheduleGenerator({ teams, fields, games, upGames, onDone }) {
-  const [ageGroup,  setAgeGroup]  = useState("U6");
-  const [startDate, setStartDate] = useState("");
-  const [endDate,   setEndDate]   = useState("");
-  const [days,      setDays]      = useState([6]); // Saturday
-  const [slots,     setSlots]     = useState(["9:00 AM","10:30 AM","12:00 PM"]);
-  const [newSlot,   setNewSlot]   = useState("");
-  const [preview,   setPreview]   = useState(null);
-  const [err,       setErr]       = useState("");
-  const [saved,     setSaved]     = useState(false);
+function ScheduleGenerator({ teams, fields, games, upGames, onDone, activeLeague, activeLeagueId }) {
+  const leagueAGs = activeLeague?.ageGroups || AGE_GROUPS;
+  const fmtMap    = getFormatMap(activeLeague);
+
+  const [ageGroup,   setAgeGroup]   = useState(leagueAGs[0] || "U6");
+  const [startDate,  setStartDate]  = useState("");
+  const [endDate,    setEndDate]    = useState("");
+  const [numRounds,  setNumRounds]  = useState(1);
+  const [days,       setDays]       = useState([6]);
+  const [slots,      setSlots]      = useState(["9:00 AM","10:30 AM","12:00 PM"]);
+  const [newSlot,    setNewSlot]    = useState("");
+  const [preview,    setPreview]    = useState(null);
+  const [err,        setErr]        = useState("");
+  const [saved,      setSaved]      = useState(false);
 
   const groupTeams = teams.filter(t => t.ageGroup === ageGroup);
-  const format     = FORMAT_MAP[ageGroup];
+  const format     = fmtMap[ageGroup] || ageGroup;
 
   const generate = () => {
     setErr(""); setSaved(false);
-    if (!startDate || !endDate)    { setErr("Select a start and end date."); return; }
+    if (!startDate || !endDate)   { setErr("Select a start and end date."); return; }
     if (new Date(endDate) < new Date(startDate)) { setErr("End date must be after start date."); return; }
-    if (groupTeams.length < 2)     { setErr(`Need at least 2 ${ageGroup} teams to generate a schedule.`); return; }
-    if (!days.length)              { setErr("Select at least one game day."); return; }
-    if (!slots.length)             { setErr("Add at least one time slot."); return; }
+    if (groupTeams.length < 2)    { setErr(`Need at least 2 ${ageGroup} teams to generate a schedule.`); return; }
+    if (!days.length)             { setErr("Select at least one game day."); return; }
+    if (!slots.length)            { setErr("Add at least one time slot."); return; }
 
-    const compatFields = fields.filter(f => f.types.includes(format));
-    if (!compatFields.length)     { setErr(`No fields support ${format} for ${ageGroup}. Add compatible fields first.`); return; }
+    const isFutsal     = activeLeague?.sport === "futsal";
+    const compatFields = isFutsal
+      ? fields.filter(f => f.types?.includes("gym") || f.isGym)
+      : fields.filter(f => f.types.includes(format));
+    if (!compatFields.length) {
+      setErr(isFutsal
+        ? `No gyms configured. Add gym venues in the Fields tab first.`
+        : `No fields support ${format} for ${ageGroup}. Add compatible fields first.`);
+      return;
+    }
 
-    const rounds  = roundRobin(groupTeams);
-    const dates   = gameDates(startDate, endDate, days);
+    const baseRounds = roundRobin(groupTeams);
+    // Build all rounds — swap home/away on even passes for fairness
+    const allRounds = [];
+    for (let pass = 0; pass < numRounds; pass++) {
+      if (pass % 2 === 0) allRounds.push(...baseRounds);
+      else allRounds.push(...baseRounds.map(r => r.map(([h,a]) => [a,h])));
+    }
 
-    if (!dates.length)  { setErr("No valid game dates in selected range for chosen day(s)."); return; }
-    if (dates.length < rounds.length) {
-      setErr(`⚠️ Only ${dates.length} game dates available, but ${rounds.length} rounds needed. Some rounds won't be scheduled.`);
+    const dates = gameDates(startDate, endDate, days);
+    if (!dates.length) { setErr("No valid game dates in selected range for chosen day(s)."); return; }
+    if (dates.length < allRounds.length) {
+      setErr(`⚠️ Only ${dates.length} game dates available but ${allRounds.length} rounds needed. Some rounds won't be scheduled.`);
     }
 
     const newGames = [];
-    for (let dIdx = 0; dIdx < Math.min(dates.length, rounds.length); dIdx++) {
-      const round = rounds[dIdx];
-      round.forEach(([home, away], gi) => {
+    for (let dIdx = 0; dIdx < Math.min(dates.length, allRounds.length); dIdx++) {
+      allRounds[dIdx].forEach(([home, away], gi) => {
         newGames.push({
           id:           uid(),
           homeTeamId:   home.id,   homeTeamName: home.name,
@@ -838,6 +961,7 @@ function ScheduleGenerator({ teams, fields, games, upGames, onDone }) {
           date:         dates[dIdx],
           time:         slots[gi % slots.length],
           ageGroup,     status:"scheduled",
+          leagueId:     activeLeagueId,
         });
       });
     }
@@ -851,19 +975,25 @@ function ScheduleGenerator({ teams, fields, games, upGames, onDone }) {
   };
 
   const toggleDay = d => setDays(p => p.includes(d) ? p.filter(x=>x!==d) : [...p,d]);
+  const baseRoundCount = roundRobin(groupTeams).length;
+  const totalRounds    = baseRoundCount * numRounds;
+  const totalGames     = groupTeams.length > 1
+    ? (groupTeams.length % 2 === 0 ? groupTeams.length/2 : Math.floor(groupTeams.length/2)) * totalRounds
+    : 0;
 
   return (
     <div>
-      <PageHeader title="Schedule Generator" subtitle="Auto-build round-robin schedules for any age group" />
+      <PageHeader title="Schedule Generator"
+        subtitle={`${activeLeague?.name||"League"} · auto-build round-robin schedules`} />
       <div style={{ display:"grid", gridTemplateColumns:"340px 1fr", gap:20, alignItems:"start" }}>
 
         {/* Config panel */}
         <div style={{ background:C.white, borderRadius:12, padding:22, border:`1px solid ${C.border}` }}>
           <SectionLabel>AGE GROUP</SectionLabel>
-          <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-            {AGE_GROUPS.map(g => (
+          <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+            {leagueAGs.map(g => (
               <button key={g} onClick={() => { setAgeGroup(g); setPreview(null); setSaved(false); }} style={{
-                flex:1, padding:"9px", border:`1px solid ${ageGroup===g?C.red:C.border}`,
+                padding:"8px 14px", border:`1px solid ${ageGroup===g?C.red:C.border}`,
                 background:ageGroup===g?C.red:C.white, color:ageGroup===g?C.white:C.sub,
                 borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer"
               }}>{g}</button>
@@ -872,13 +1002,32 @@ function ScheduleGenerator({ teams, fields, games, upGames, onDone }) {
           <div style={{ fontSize:12, color:C.muted, marginBottom:18, padding:"8px 10px",
             background:C.bg, borderRadius:8 }}>
             {groupTeams.length} teams · {format} format ·&nbsp;
-            {roundRobin(groupTeams).length} rounds needed
+            {baseRoundCount} rounds/pass · {totalGames} total games
+          </div>
+
+          {/* Number of rounds */}
+          <div style={{ marginBottom:16 }}>
+            <SectionLabel>NUMBER OF ROUNDS</SectionLabel>
+            <div style={{ display:"flex", gap:8, marginTop:8 }}>
+              {[1,2,3,4].map(n => (
+                <button key={n} onClick={() => { setNumRounds(n); setPreview(null); }} style={{
+                  flex:1, padding:"9px", border:`1px solid ${numRounds===n?C.red:C.border}`,
+                  background:numRounds===n?C.red:C.white, color:numRounds===n?C.white:C.sub,
+                  borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer"
+                }}>{n}</button>
+              ))}
+            </div>
+            <div style={{ fontSize:11, color:C.muted, marginTop:6 }}>
+              {numRounds===1?"Each team plays every other team once.":
+               numRounds===2?"Double round-robin — home/away swapped in 2nd pass.":
+               `${numRounds} passes · ${totalRounds} total rounds needed.`}
+            </div>
           </div>
 
           <FInput label="Season Start" type="date" value={startDate}
             onChange={e=>{setStartDate(e.target.value);setPreview(null);}} />
           <div style={{ marginTop:12 }}>
-            <FInput label="Season End"   type="date" value={endDate}
+            <FInput label="Season End" type="date" value={endDate}
               onChange={e=>{setEndDate(e.target.value);setPreview(null);}} />
           </div>
 
@@ -914,7 +1063,7 @@ function ScheduleGenerator({ teams, fields, games, upGames, onDone }) {
                 placeholder="e.g. 9:00 AM"
                 style={{ flex:1, padding:"7px 10px", border:`1px solid ${C.border}`,
                   borderRadius:8, fontSize:13, outline:"none", fontFamily:"DM Sans,sans-serif" }} />
-              <button onClick={() => { if(newSlot&&!slots.includes(newSlot)){setSlots(p=>[...p,newSlot]);setNewSlot(""); }}} style={{
+              <button onClick={() => { if(newSlot&&!slots.includes(newSlot)){setSlots(p=>[...p,newSlot]);setNewSlot("");} }} style={{
                 padding:"7px 14px", background:C.red, color:C.white, border:"none",
                 borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600 }}>＋</button>
             </div>
@@ -939,9 +1088,7 @@ function ScheduleGenerator({ teams, fields, games, upGames, onDone }) {
             <div style={{ background:"#DCFCE7", border:`1px solid ${C.success}`, borderRadius:12,
               padding:40, textAlign:"center" }}>
               <div style={{ fontSize:40, marginBottom:12 }}>✅</div>
-              <div style={{ fontFamily:"Oswald,sans-serif", fontSize:22, color:C.success }}>
-                SCHEDULE SAVED!
-              </div>
+              <div style={{ fontFamily:"Oswald,sans-serif", fontSize:22, color:C.success }}>SCHEDULE SAVED!</div>
               <div style={{ color:C.sub, marginTop:8 }}>Redirecting to Schedule view…</div>
             </div>
           ) : !preview ? (
@@ -960,11 +1107,10 @@ function ScheduleGenerator({ teams, fields, games, upGames, onDone }) {
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                 <div>
                   <div style={{ fontFamily:"Oswald,sans-serif", fontSize:20, color:C.navy }}>
-                    {ageGroup} SCHEDULE PREVIEW — {preview.length} GAMES
+                    {ageGroup} PREVIEW — {preview.length} GAMES · {numRounds} ROUND{numRounds>1?"S":""}
                   </div>
                   <div style={{ fontSize:13, color:C.muted, marginTop:2 }}>
-                    {new Set(preview.map(g=>g.date)).size} game days ·&nbsp;
-                    {fields.filter(f=>f.types.includes(format)).length} compatible fields
+                    {new Set(preview.map(g=>g.date)).size} game days · {fields.filter(f=>f.types.includes(format)).length} compatible fields
                   </div>
                 </div>
                 <div style={{ display:"flex", gap:8 }}>
@@ -1356,6 +1502,7 @@ function PracticesCoach({ user, team, practices, allPractices, fields, blocked, 
       teamName:  team?.name||"My Team",
       ageGroup:  team?.ageGroup||"",
       coachName: team?.coachName||user.name,
+      leagueId:  team?.leagueId||user.leagueId||"",
     };
     const updated = p.id
       ? allPractices.map(x => x.id===p.id ? full : x)
@@ -1568,6 +1715,147 @@ function PracticeForm({ initial, fields, blocked, games, allPractices, teamId, o
         <Btn onClick={onClose} outline>Cancel</Btn>
       </div>
       {!valid && <div style={{ fontSize:12, color:C.muted, textAlign:"center" }}>Select a date, time, and field to continue</div>}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LEAGUES MANAGER
+═══════════════════════════════════════════════════════════ */
+function LeaguesManager({ leagues, upLeagues, teams, games, practices }) {
+  const [modal, setModal] = useState(null);
+
+  const handleSave = async (lg) => {
+    await upLeagues(lg.id
+      ? leagues.map(l => l.id===lg.id ? lg : l)
+      : [...leagues, { ...lg, id:uid() }]);
+    setModal(null);
+  };
+
+  const handleDelete = async (id) => {
+    if (teams.some(t => t.leagueId===id)) {
+      alert("Remove all teams from this league before deleting it.");
+      return;
+    }
+    if (window.confirm("Delete this league and all its games/practices?")) {
+      await upLeagues(leagues.filter(l => l.id!==id));
+    }
+  };
+
+  return (
+    <div>
+      <PageHeader title="Leagues" subtitle={`${leagues.length} league${leagues.length!==1?"s":""} configured`}
+        action={<Btn onClick={() => setModal({})}>＋ Add League</Btn>} />
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:16 }}>
+        {leagues.map(lg => {
+          const lgTeams     = teams.filter(t => t.leagueId===lg.id);
+          const lgGames     = games.filter(g => g.leagueId===lg.id);
+          const lgPractices = practices.filter(p => p.leagueId===lg.id);
+          return (
+            <div key={lg.id} style={{ background:C.white, borderRadius:14, overflow:"hidden",
+              border:`1px solid ${C.border}`, boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+              <div style={{ background:lg.sport==="futsal"?C.navy:C.red, padding:"18px 20px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ fontFamily:"Oswald,sans-serif", fontSize:20, color:C.white, fontWeight:700 }}>
+                      {lg.sport==="futsal"?"🏟️":"⚽"} {lg.name}
+                    </div>
+                    <div style={{ fontSize:12, color:"rgba(255,255,255,0.7)", marginTop:4, letterSpacing:0.5 }}>
+                      {lg.sport==="futsal"?"FUTSAL":"OUTDOOR"} · {lg.ageGroups?.join(" · ")}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <IconBtn onClick={() => setModal(lg)} title="Edit">✏️</IconBtn>
+                    {leagues.length > 1 && <IconBtn onClick={() => handleDelete(lg.id)} title="Delete">🗑️</IconBtn>}
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding:"16px 20px", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+                {[["Teams",lgTeams.length,"👥"],["Games",lgGames.length,"⚽"],["Practices",lgPractices.length,"🏃"]].map(([l,v,e]) => (
+                  <div key={l} style={{ textAlign:"center", padding:"10px 6px",
+                    background:C.bg, borderRadius:10 }}>
+                    <div style={{ fontSize:20 }}>{e}</div>
+                    <div style={{ fontFamily:"Oswald,sans-serif", fontSize:22, color:C.navy, fontWeight:700 }}>{v}</div>
+                    <div style={{ fontSize:11, color:C.muted }}>{l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding:"0 20px 16px" }}>
+                <div style={{ fontSize:12, color:C.muted }}>
+                  Age groups: {lg.ageGroups?.join(", ")||"None set"}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {leagues.length===0 && <EmptyState icon="🏆" msg="No leagues yet. Add your first league!" />}
+
+      {modal!==null && (
+        <Modal title={modal.id?"Edit League":"Add League"} onClose={() => setModal(null)}>
+          <LeagueForm initial={modal} onSave={handleSave} onClose={() => setModal(null)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function LeagueForm({ initial, onSave, onClose }) {
+  const [v, setV] = useState({
+    name:"", sport:"outdoor", ageGroups:["U6","U8","U10"], ...initial
+  });
+  const set = k => e => setV(p => ({...p, [k]:e.target.value}));
+  const toggleAG = ag => setV(p => ({...p,
+    ageGroups: p.ageGroups.includes(ag) ? p.ageGroups.filter(x=>x!==ag) : [...p.ageGroups, ag]
+  }));
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      <FInput label="League Name" value={v.name} onChange={set("name")} placeholder="e.g. Outdoor Rec, Futsal Winter" />
+
+      <div>
+        <Label>SPORT</Label>
+        <div style={{ display:"flex", gap:8, marginTop:8 }}>
+          {[["outdoor","⚽ Outdoor"],["futsal","🏟️ Futsal"],["other","🎯 Other"]].map(([val,lbl]) => (
+            <button key={val} onClick={() => setV(p=>({...p,sport:val}))} style={{
+              flex:1, padding:"9px 6px", border:`1px solid ${v.sport===val?C.red:C.border}`,
+              background:v.sport===val?C.red:C.white, color:v.sport===val?C.white:C.sub,
+              borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer"
+            }}>{lbl}</button>
+          ))}
+        </div>
+        {v.sport==="futsal" && (
+          <div style={{ marginTop:8, padding:"8px 12px", background:"#EEF2FF", borderRadius:8,
+            fontSize:12, color:"#4F46E5" }}>
+            💡 Futsal formats: U6→3v3, U8→4v4, U10→5v5, U12+→5v5
+          </div>
+        )}
+      </div>
+
+      <div>
+        <Label>AGE GROUPS</Label>
+        <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+          {ALL_AGE_GROUPS.map(ag => (
+            <button key={ag} onClick={() => toggleAG(ag)} style={{
+              padding:"7px 12px", border:`1px solid ${v.ageGroups.includes(ag)?C.red:C.border}`,
+              background:v.ageGroups.includes(ag)?C.red:C.white,
+              color:v.ageGroups.includes(ag)?C.white:C.sub,
+              borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer"
+            }}>{ag}</button>
+          ))}
+        </div>
+        {v.ageGroups.length===0 && (
+          <div style={{ fontSize:12, color:C.danger, marginTop:6 }}>Select at least one age group.</div>
+        )}
+      </div>
+
+      <div style={{ display:"flex", gap:10, marginTop:4 }}>
+        <Btn onClick={() => v.name && v.ageGroups.length && onSave(v)} full
+          disabled={!v.name || !v.ageGroups.length}>Save League</Btn>
+        <Btn onClick={onClose} outline>Cancel</Btn>
+      </div>
     </div>
   );
 }
